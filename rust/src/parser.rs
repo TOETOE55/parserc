@@ -29,11 +29,7 @@ impl<'a> Iterator for ParseState<'a> {
     type Item = char;
     fn next(&mut self) -> Option<Self::Item> {
         self.src.next().map(|ch| {
-            match ch {
-                '\n' => self.row +=1 ,
-                '\t' => self.col = self.col+8 - (self.col-1)%8 ,
-                _    => self.col += 1 ,
-            }
+            self.update_pos(ch);
             ch
         })
     }
@@ -198,18 +194,17 @@ impl<'s> Parser for Strg<'s> {
     fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
         let old = state.clone();
         let mut chars = self.s.chars();
-        loop {
-            match chars.next() {
-                Option::None    => return Some(self.s) ,
-                Option::Some(a) => match state.next() {
-                    Option::None    => return None ,
-                    Option::Some(b) => if a != b {
-                        *state = old;
-                        return None
-                    } ,
-                }
-            }
+
+        while let Some(c) = chars.next() {
+            match char(c).parse(state) {
+                None => {
+                    *state = old;
+                    return None;
+                } ,
+                ok => ok ,
+            };
         }
+        Some(self.s)
     }
 }
 
@@ -299,8 +294,8 @@ impl<P: Parser> Parser for Many<P> {
     type Target = Vec<P::Target>;
     fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
         let mut vec = vec![];
+        let old = state.clone();
         loop {
-            let old = state.clone();
             match self.parser.parse(state) {
                 Some(a) => vec.push(a),
                 None => { *state = old; break; }
@@ -321,11 +316,10 @@ impl<P: Parser> Parser for Some<P> {
     type Target = Vec<P::Target>;
     fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
         let mut vec = vec![];
-        let old = state.clone();
-        if let Some(a) = self.parser.parse(state) {
-            vec.push(a);
-        } else { *state = old; return None; }
 
+        self.parser.parse(state).map(|a| vec.push(a))?;
+
+        let old = state.clone();
         loop {
             let old = state.clone();
             match self.parser.parse(state) {
