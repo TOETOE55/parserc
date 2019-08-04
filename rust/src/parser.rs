@@ -321,7 +321,6 @@ impl<P: Parser> Parser for Some<P> {
 
         let old = state.clone();
         loop {
-            let old = state.clone();
             match self.parser.parse(state) {
                 Some(a) => vec.push(a),
                 None => { *state = old; break; }
