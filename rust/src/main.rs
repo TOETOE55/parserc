@@ -33,14 +33,17 @@ fn main() {
     let mut src = ParseState::new("2H");
     let res = dynamic().parse(&mut src);
     assert_eq!(res, Some('H'));
+    println!("{}", src.src.as_str());
 
     let mut src = ParseState::new("123v");
     let res = num().parse(&mut src);
     assert_eq!(res, Some(123));
+    println!("{}", src.src.as_str());
 
     let mut src = ParseState::new("123v");
     let res = strg("123").parse(&mut src);
     assert_eq!(res, Some("123"));
+    println!("{}", src.src.as_str());
 
     let mut src = "1234".chars();
     let res =
@@ -48,6 +51,15 @@ fn main() {
             .and_then(|ch| another::satisfy_b(|ch| ch.is_numeric()))
             .parse(&mut src);
     assert_eq!(res, Some('2'));
+    println!("{}", src.as_str());
+
+    let mut src = ParseState::new("1234");
+    let parser = char('1')
+        .and(char('2'))
+        .and(char('4'));
+    let res = parser.parse(&mut src);
+    assert_eq!(res, None);
+    println!("{}", src.src.as_str());
 
 }
 

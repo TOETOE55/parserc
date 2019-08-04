@@ -2,7 +2,7 @@ use std::str::Chars;
 
 #[derive(Clone, Debug)]
 pub struct ParseState<'a> {
-    src: Chars<'a>,
+    pub src: Chars<'a>,
     pub col: usize,
     pub row: usize,
 }
@@ -231,10 +231,7 @@ impl<A, B> Parser for Or<A, B> where
 {
     type Target = A::Target;
     fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
-        let old = state.clone();
-        let first = self.a.parse(state);
-
-        recover(state, old, first).or_else(|| self.b.parse(state))
+        self.a.parse(state).or_else(|| self.b.parse(state))
     }
 }
 
