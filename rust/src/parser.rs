@@ -1,4 +1,6 @@
 use std::str::Chars;
+use std::marker::PhantomData;
+use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub struct ParseState<'a> {
@@ -49,6 +51,14 @@ pub trait Parser {
         Self: Sized
     {
         And { a: self, b: other }
+    }
+
+    fn app<PF, T, F>(self, pf: PF) -> App<Self, PF> where
+        Self: Sized,
+        F: Fn(Self::Target) -> T,
+        PF: Parser<Target=F>,
+    {
+        App { a: self, ab: pf }
     }
 
     fn map<B, F>(self, f: F) -> Map<Self, F> where
@@ -102,7 +112,7 @@ impl<P: Parser + ?Sized> Parser for Box<P> {
     }
 }
 
-impl<P: Parser + ?Sized> Parser for std::rc::Rc<P> {
+impl<P: Parser + ?Sized> Parser for Rc<P> {
     type Target = P::Target;
     fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
         (**self).parse(state)
@@ -113,19 +123,31 @@ impl<P: Parser + ?Sized> Parser for std::rc::Rc<P> {
 
 /// pure
 #[derive(Clone)]
-pub struct Pure<Target> {
-    x: Target
+pub struct Pure<F> {
+    x: F,
 }
-
-impl<Target: Clone> Parser for Pure<Target> {
-    type Target = Target;
+impl<T, F: Fn() -> T> Parser for Pure<F> {
+    type Target = T;
     fn parse<'a>(&self, _state: &mut ParseState<'a>) -> Option<Self::Target> {
-        Some(self.clone().x)
+        Some((self.x)())
     }
 }
 
-pub fn pure<T>(x: T) -> Pure<T> {
+pub fn pure<T, F: Fn() -> T>(x: F) -> Pure<F> {
     Pure { x }
+}
+
+/// failure
+pub struct Failure<T>(PhantomData<T>);
+impl<T> Parser for Failure<T> {
+    type Target = T;
+    fn parse<'a>(&self, _state: &mut ParseState<'a>) -> Option<Self::Target> {
+        None
+    }
+}
+
+pub fn failure<T>() -> Failure<T> {
+    Failure(PhantomData)
 }
 
 /// satisfy
@@ -201,7 +223,7 @@ impl<'s> Parser for Strg<'s> {
                     *state = old;
                     return None;
                 } ,
-                ok => ok ,
+                _ok => { } ,
             };
         }
         Some(self.s)
@@ -212,7 +234,24 @@ pub fn strg(s: &str) -> Strg {
     Strg { s }
 }
 
-/// adaptor
+
+/// EOF
+#[derive(Clone)]
+pub struct EOF;
+
+impl Parser for EOF {
+    type Target = ();
+    fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
+        let old = state.clone();
+        match state.src.next() {
+            None => Some(()),
+            Some(_) => { *state = old; None }
+        }
+    }
+}
+
+pub fn eof() -> EOF { EOF }
+
 /// or
 #[derive(Clone)]
 pub struct Or<A, B> {
@@ -241,7 +280,8 @@ impl<A: Parser, B: Parser> Parser for And<A, B> {
     type Target = B::Target;
     fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
         let old = state.clone();
-        let res = self.a.parse(state).and(self.b.parse(state));
+        let res =
+            self.a.parse(state).and_then(|_| self.b.parse(state));
 
         recover(state, old, res)
     }
@@ -260,6 +300,29 @@ impl<B, P: Parser, F> Parser for Map<P, F>
     type Target = B;
     fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
         self.parser.parse(state).map(&self.f)
+    }
+}
+
+/// applicative
+#[derive(Clone)]
+pub struct App<A, AB> {
+    a: A,
+    ab: AB,
+}
+
+impl<A, AB, T, F> Parser for App<A, AB> where
+    A: Parser,
+    F: Fn(A::Target) -> T,
+    AB: Parser<Target=F>,
+{
+    type Target = T;
+    fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
+        let old = state.clone();
+        let res = self.ab.parse(state)
+            .and_then(|f| self.a.parse(state)
+                .and_then(|x| Some(f(x))));
+
+        recover(state, old, res)
     }
 }
 
@@ -294,8 +357,8 @@ impl<P: Parser> Parser for Many<P> {
     type Target = Vec<P::Target>;
     fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
         let mut vec = vec![];
-        let old = state.clone();
         loop {
+            let old = state.clone();
             match self.parser.parse(state) {
                 Some(a) => vec.push(a),
                 None => { *state = old; break; }
@@ -319,8 +382,8 @@ impl<P: Parser> Parser for Some<P> {
 
         self.parser.parse(state).map(|a| vec.push(a))?;
 
-        let old = state.clone();
         loop {
+            let old = state.clone();
             match self.parser.parse(state) {
                 Some(a) => vec.push(a),
                 None => { *state = old; break; }
@@ -329,4 +392,29 @@ impl<P: Parser> Parser for Some<P> {
 
         Some(vec)
     }
+}
+
+
+/// fix
+pub struct Fix<A> {
+    fix: Rc<dyn Fn(Fix<A>) -> Box<dyn Parser<Target=A>>>
+}
+
+impl<A> Clone for Fix<A> {
+    fn clone(&self) -> Self {
+        Fix {
+            fix: self.fix.clone(),
+        }
+    }
+}
+
+impl<A> Parser for Fix<A> {
+    type Target = A;
+    fn parse<'a>(&self, state: &mut ParseState<'a>) -> Option<Self::Target> {
+        (self.fix)((*self).clone()).parse(state)
+    }
+}
+
+pub fn fix<A>(fix: Rc<dyn Fn(Fix<A>) -> Box<dyn Parser<Target=A>>>) -> Fix<A> {
+    Fix { fix }
 }

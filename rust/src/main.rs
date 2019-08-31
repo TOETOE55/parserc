@@ -1,7 +1,9 @@
 mod parser;
 mod another;
-
+mod other;
 use parser::*;
+use std::rc::Rc;
+use std::marker::PhantomData;
 
 fn num() -> impl Parser<Target=u64> {
     satisfy(|ch| ch.is_numeric())
@@ -16,7 +18,8 @@ fn num() -> impl Parser<Target=u64> {
 fn aaab_c() -> impl Parser<Target=()> {
     char('a').some()
         .and(char('b').or(char('c')))
-        .map(|_| ())
+        .and(pure(||{}))
+        .or(failure())
 
 }
 
@@ -27,6 +30,13 @@ fn dynamic() -> impl Parser<Target=char> {
     } else {
         Box::new(satisfy(|ch| ch.is_lowercase()))
     })
+}
+
+fn recursion() -> impl Parser<Target=()> {
+    fix(Rc::new(|this|
+        Box::new(char('.').and(this)
+            .or(char('^')))))
+        .and(pure(|| { }))
 }
 
 fn main() {
@@ -45,21 +55,11 @@ fn main() {
     assert_eq!(res, Some("123"));
     println!("{}", src.src.as_str());
 
-    let mut src = "1234".chars();
-    let res =
-        another::satisfy_b(|ch| ch.is_numeric())
-            .and_then(|ch| another::satisfy_b(|ch| ch.is_numeric()))
-            .parse(&mut src);
-    assert_eq!(res, Some('2'));
-    println!("{}", src.as_str());
 
-    let mut src = ParseState::new("1234");
-    let parser = char('1')
-        .and(char('2'))
-        .and(char('4'));
+    let mut src = ParseState::new("...^");
+    let parser = recursion();
     let res = parser.parse(&mut src);
-    assert_eq!(res, None);
+    assert_eq!(res, Some(()));
     println!("{}", src.src.as_str());
-
 }
 
